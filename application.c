@@ -8,6 +8,8 @@
 #include <stdio.h>
 
 #define APP_BUFSIZE 10
+#define CAN_QUEUE_SIZE 10
+
 
 #define CAN_ENCODE_PLAYER_STATE(tempo, key, index, enabled) {(uchar)tempo, (uchar)key, (uchar)index, (uchar)enabled, 0, 0, 0, 0}
 
@@ -25,6 +27,20 @@
 char debugMessage[40];
 
 typedef struct {
+	CANMsg can;
+	uchar padding;
+} CANMsgElement;
+
+typedef struct {
+	Object super;
+	char canBuffLast;
+	char canBuffFirst;
+	char canBuffCount;
+	char canFetching;
+	CANMsgElement canBuff[CAN_QUEUE_SIZE];	
+} CANRegulator;
+
+typedef struct {
     Object super;
     int count;
     char c;
@@ -37,16 +53,19 @@ typedef struct {
 #endif
 	uchar contactBounce;
 	Timer timer;
-	Time tap_sample; //timestamp for click event
-	int userState; //config state, trigger handler either on pressed (0) or released (1)
-	int buttonHold; //button hold and press
+	Time tap_sample; 			//timestamp for click event
+	int userState; 				//config state, trigger handler either on pressed (0) or released (1)
+	int buttonHold; 			//button hold and press
+	int sequenceNumber;
 	char buff[APP_BUFSIZE];
 } App;
 
+#define initCANRegulator()  { initObject(), 0, 0, 0, 0}
+
 #ifndef LEADER
-App app = { initObject(), 0, 'X', 0 , 120, 0, 0 , 0, 0, initTimer(), 0,0,0};
+App app = { initObject(), 0, 'X', 0 , 120, 0, 0 , 0, 0, initTimer(), 0,0,0,0};
 #else
-App app = { initObject(), 0, 'X', 0, 0,  initTimer(), 0,0,0};
+App app = { initObject(), 0, 'X', 0, 0,  initTimer(), 0,0,0,0};
 #endif
 
 void reader(App*, int);
@@ -64,6 +83,8 @@ MusicPlayer player = {initObject(), 120, 0, 0,0};
 
 SysIO io = initSysIO(SIO_PORT0, &app, button_pressed);
 
+CANRegulator regulator = initCANRegulator();
+
 /*SYSIO*/
 void set_LED(MusicPlayer *self, int unused){
 	if(self->enabled){
@@ -73,9 +94,70 @@ void set_LED(MusicPlayer *self, int unused){
 	}
 }
 
+void pushCanQueue(CANRegulator *self, CANMsg *msg){
+	CANMsgElement element = {*msg, 0};
+	//Add message to buffer
+	self->canBuff[(int)(self->canBuffLast)] = element;
+	//update buffer pointer
+	self->canBuffLast = (self->canBuffLast + 1) % CAN_QUEUE_SIZE;		
+	//update number of messages in buffer
+	self->canBuffCount = self->canBuffCount + 1;		
+}
+
+void popCanQueue(CANRegulator *self, CANMsg *msg){
+	//get next message from buffer
+	CANMsgElement msgelem = self->canBuff[(int)(self->canBuffFirst)];
+	*msg = msgelem.can;
+	//update pointer and number of messages in buffer
+	self->canBuffFirst = (self->canBuffFirst +1) % CAN_QUEUE_SIZE;
+	self->canBuffCount = self->canBuffCount - 1;
+}
+void fetchCanQueue(CANRegulator *self, int unused){
+	if(self->canBuffCount > 0) {
+		self->canFetching = 1;
+		//get next message from buffer	
+		CANMsg msg;
+		popCanQueue(self, &msg);
+			
+		//print the message
+		DEBUG("Received sequence number: ");
+		DEBUG_INT(msg.msgId);
+		DEBUG("\n");
+		
+		AFTER(SEC(1),self,fetchCanQueue,0);
+	}
+	else {
+		//if buffer empty, indicate termination of fetching
+		self->canFetching = 0;
+	}
+}
+
+int getCanBuffCount(CANRegulator *self, int unused){
+	return self->canBuffCount;
+}
+
+int getCanFetching(CANRegulator *self, int unused){
+	return self->canFetching;
+}
 
 void reset_bounce(App *self, int unused){
 	self->contactBounce = 0;
+}
+
+void burst_transmission(App *self,int unused) {
+	Time diff = T_SAMPLE(&self->timer) - self->tap_sample;
+	
+	if(self->buttonHold == 1 && diff >= SEC(2)) {		
+		//Send can message
+		CANMsg msg;
+		msg.msgId = self->sequenceNumber;
+		msg.nodeId = 0;
+		CAN_SEND(&can0, &msg);
+		
+		AFTER(MSEC(500),self,burst_transmission,0);
+		
+		self->sequenceNumber = (self->sequenceNumber + 1) % 127;
+	}
 }
 
 void press_and_hold(App *self,int unused) {
@@ -83,6 +165,7 @@ void press_and_hold(App *self,int unused) {
 	
 	if(self->buttonHold == 1 && diff >= SEC(2)) {
 		DEBUG("Entered press-and-hold mode \n");
+		ASYNC(self,burst_transmission,0);
 	}
 }
 
@@ -108,6 +191,21 @@ void button_pressed(App *self, int unused){
 		
 		AFTER(MSEC(100), self, reset_bounce, 0);
 		
+		//Send can msg if button pressed
+		if(state == 0) {
+			CANMsg msg;
+			msg.msgId = self->sequenceNumber;
+			msg.nodeId = 0;
+			CAN_SEND(&can0, &msg);
+			
+			DEBUG("Sequence number: ");
+			DEBUG_INT(self->sequenceNumber);
+			DEBUG("\n");
+			
+			self->sequenceNumber = (self->sequenceNumber + 1) % 127;
+		}
+
+		
 		//If button is pressed the first time, set intital tap sample
 		if(self->tap_sample == 0 && state == 0){
 			self->tap_sample = T_SAMPLE(&self->timer);
@@ -124,11 +222,16 @@ void button_pressed(App *self, int unused){
 
 			//button is pressed second time
 			if(state == 0){
+				
+				//START TIMER 2 SEC(only for problem 2)
+				self->buttonHold = 1;
+				AFTER(MSEC(2000), self, press_and_hold, 0);
+				
 				if(diff < SEC(2) && diff > MSEC(200)) {
 					
-					DEBUG("Inter-arrival time: ");
-					DEBUG_INT(time);
-					DEBUG("\n");
+				//	DEBUG("Inter-arrival time: ");
+				//	DEBUG_INT(time);
+				//	DEBUG("\n");
 					
 					ASYNC(&player, set_tempo, MSEC_TO_BPM(time));
 				}
@@ -141,6 +244,7 @@ void button_pressed(App *self, int unused){
 			//button is realeased
 			else if(state == 1) {
 				if(diff > SEC(2)) {
+					/*
 					DEBUG("Time held (msec): ");
 					DEBUG_INT(time);
 					DEBUG("\n");
@@ -149,7 +253,7 @@ void button_pressed(App *self, int unused){
 					DEBUG("Default tempo: ");
 					DEBUG_INT(120);
 					DEBUG("\n");
-					
+					*/
 					//set default tempo
 					ASYNC(&player, set_tempo, 120);
 					self->tap_sample = 0;
@@ -162,14 +266,24 @@ void button_pressed(App *self, int unused){
 	}
 }
 
+
+
 void receiver(App *self, int unused) {
-	char string[20];
-	
     CANMsg msg;
     CAN_RECEIVE(&can0, &msg);
-	snprintf(string, 20 , "%d %d %d %d", msg.buff[0], (signed char)msg.buff[1], msg.buff[2], msg.buff[3]);
+	//CANMsgElement element = {msg, 0};
+	int buffcount = SYNC(&regulator, getCanBuffCount, 0);
+	if(buffcount < CAN_QUEUE_SIZE) {
+		//start fetching from queue, if queue-fetching is not already running
+		SYNC(&regulator, pushCanQueue, &msg);
+		if(buffcount == 0 && SYNC(&regulator, getCanFetching, 0) == 0) {
+			ASYNC(&regulator, fetchCanQueue, 0);
+		}
+	}
 	
 #ifndef LEADER
+
+/*
 	if(msg.msgId == MSG_CHANGE_PARAM || msg.msgId == MSG_RESTART ){
 		uchar old_enabled = SYNC(&player, get_player_enabled, 0);
 		//update all parameters
@@ -184,13 +298,8 @@ void receiver(App *self, int unused) {
 		if(msg.buff[3] && !old_enabled)
 			ASYNC(&player, play_tune, 0);
 	}
-	
+	*/
 #endif
-
-    SCI_WRITE(&sci0, "Can msg received: ");
-	SCI_WRITE(&sci0, string);
-   // SCI_WRITE(&sci0, msg.buff);
-	SCI_WRITE(&sci0, "\n");
 }
 
 void can_update(uchar tempo, uchar key, uchar index, uchar enabled, int msgId){
@@ -381,7 +490,7 @@ void startApp(App *self, int arg) {
     msg.buff[3] = 'l';
     msg.buff[4] = 'o';
     msg.buff[5] = 0;
-    CAN_SEND(&can0, &msg);
+  //  CAN_SEND(&can0, &msg);
 	
 	SIO_WRITE(&io, 1);
 }
