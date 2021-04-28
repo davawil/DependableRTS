@@ -88,16 +88,20 @@ void press_and_hold(App *self,int unused) {
 
 void button_pressed(App *self, int unused){
 	//valid button press
-	if(!self->contactBounce || self->userState == 1){
+	DEBUG_INT(self->contactBounce);
 	
-		self->contactBounce = 1;		
-		
+	
+	if(!self->contactBounce){
+
 		int state = SIO_READ(&io);
 		
 		//if pressed, react to release
 		if(state == 0) {
 			SIO_TRIG(&io, 1);
 			self->userState = 1;
+			
+			self->contactBounce = 1;		
+			AFTER(MSEC(100), self, reset_bounce, 0);
 		}
 			
 		//if released, react to press
@@ -105,8 +109,6 @@ void button_pressed(App *self, int unused){
 			SIO_TRIG(&io, 0);
 			self->userState = 0;
 		}
-		
-		AFTER(MSEC(100), self, reset_bounce, 0);
 		
 		//If button is pressed the first time, set intital tap sample
 		if(self->tap_sample == 0 && state == 0){
