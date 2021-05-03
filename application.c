@@ -72,6 +72,7 @@ void reader(App*, int);
 void receiver(App*, int);
 void button_pressed(App *, int);
 void keyPrinter(int);
+void handleMessage(App *self, CANMsg* msgptr);
 
 Serial sci0 = initSerial(SCI_PORT0, &app, reader);
 
@@ -112,6 +113,7 @@ void popCanQueue(CANRegulator *self, CANMsg *msg){
 	self->canBuffFirst = (self->canBuffFirst +1) % CAN_QUEUE_SIZE;
 	self->canBuffCount = self->canBuffCount - 1;
 }
+
 void fetchCanQueue(CANRegulator *self, int unused){
 	if(self->canBuffCount > 0) {
 		self->canFetching = 1;
@@ -119,10 +121,7 @@ void fetchCanQueue(CANRegulator *self, int unused){
 		CANMsg msg;
 		popCanQueue(self, &msg);
 			
-		//print the message
-		DEBUG("Received sequence number: ");
-		DEBUG_INT(msg.msgId);
-		DEBUG("\n");
+		SYNC(&app,handleMessage,&msg);
 		
 		AFTER(SEC(1),self,fetchCanQueue,0);
 	}
@@ -131,6 +130,22 @@ void fetchCanQueue(CANRegulator *self, int unused){
 		self->canFetching = 0;
 	}
 }
+
+void handleMessage(App *self, CANMsg* msgptr){
+	
+	Time time = T_SAMPLE(&self->timer);
+	
+	int timestamp = SEC_OF(time);
+	
+	//print the message
+	DEBUG("Received sequence number: ");
+	DEBUG_INT(msgptr->msgId);
+	DEBUG("Timestamp: ");
+	DEBUG_INT(timestamp);
+	DEBUG("\n");
+
+}
+
 
 int getCanBuffCount(CANRegulator *self, int unused){
 	return self->canBuffCount;
@@ -170,27 +185,34 @@ void press_and_hold(App *self,int unused) {
 }
 
 void button_pressed(App *self, int unused){
-	//valid button press
-	if(!self->contactBounce || self->userState == 1){
 	
-		self->contactBounce = 1;		
+	int state = SIO_READ(&io);
 		
-		int state = SIO_READ(&io);
+	//if pressed, react to release
+	if(state == 0) {
+		SIO_TRIG(&io, 1);
+		self->userState = 1;
 		
-		//if pressed, react to release
-		if(state == 0) {
-			SIO_TRIG(&io, 1);
-			self->userState = 1;
-		}
+	}
 			
-		//if released, react to press
-		if(state == 1) {
-			SIO_TRIG(&io, 0);
-			self->userState = 0;
+	//if released, react to press
+	if(state == 1) {
+		SIO_TRIG(&io, 0);
+		self->userState = 0;
+		
+	}
+	
+	//valid button press
+	if(!self->contactBounce){
+	
+		
+		//if pressed, set contactbounce
+		if(state == 0) {
+			self->contactBounce = 1;		
+			AFTER(MSEC(100), self, reset_bounce, 0);
 		}
 		
-		AFTER(MSEC(100), self, reset_bounce, 0);
-		
+				
 		//Send can msg if button pressed
 		if(state == 0) {
 			CANMsg msg;
@@ -236,7 +258,7 @@ void button_pressed(App *self, int unused){
 					ASYNC(&player, set_tempo, MSEC_TO_BPM(time));
 				}
 				else {
-					DEBUG("invalid\n");
+					//DEBUG("invalid\n");
 				}
 				self->tap_sample = 0;
 				T_RESET(&self->timer);
@@ -264,6 +286,13 @@ void button_pressed(App *self, int unused){
 			}
 		}
 	}
+	//if contact bounce invert buttonHold
+	//since every contact bounce will have a release AND a press it will reset to old value
+	//needed to reset hold when click is too quick
+	else {
+		if(self->buttonHold == 1) {self->buttonHold = 0;}
+		else {self->buttonHold = 1;}
+	}
 }
 
 
@@ -272,6 +301,7 @@ void receiver(App *self, int unused) {
     CANMsg msg;
     CAN_RECEIVE(&can0, &msg);
 	//CANMsgElement element = {msg, 0};
+	
 	int buffcount = SYNC(&regulator, getCanBuffCount, 0);
 	if(buffcount < CAN_QUEUE_SIZE) {
 		//start fetching from queue, if queue-fetching is not already running

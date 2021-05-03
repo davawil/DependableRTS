@@ -12,6 +12,8 @@
 #define KEY_MIN -5
 #define TEMPO_MAX 240
 #define TEMPO_MIN 60
+#define MAX_VOLUME 10
+#define MIN_VOLUME 1
 
 #define BPM_TO_MSEC(X) 60000/X		//amount of milli seconds per beat provided the bpm
 #define MSEC_TO_BPM(X) 60000/X		//beats per minute provided the number of milliseconds
