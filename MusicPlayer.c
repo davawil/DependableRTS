@@ -1,106 +1,78 @@
 #include "MusicPlayer.h"
-#include <stdio.h>
 #include "ToneGen.h"
-#define BEAT 500
-#define H_BEAT 250
-#define D_BEAT 1000
 
+#define BROTHER_JOHN_TUNE {0,2,4,0,0,2,4,0,4,5,7,4,5,7,7,9,7,5,4,0,7,9,7,5,4,0,0,-5,0,0,-5,0}
+#define BROTHER_JOHN_HALF_BEATS {2,2,2,2,2,2,2,2,2,2,4,2,2,4,1,1,1,1,2,2,1,1,1,1,2,2,2,2,4,2,2,4}
 
-extern Serial sci0;
-extern int indicies[32];
-extern int periods[25];
-int beats[32] = {BEAT,BEAT,BEAT,BEAT,BEAT,BEAT,BEAT,BEAT,BEAT,BEAT,D_BEAT,BEAT,BEAT,D_BEAT,H_BEAT,H_BEAT,H_BEAT,H_BEAT,BEAT,BEAT,H_BEAT,H_BEAT,H_BEAT,H_BEAT,BEAT,BEAT,BEAT,BEAT,D_BEAT,BEAT,BEAT,D_BEAT};
+int tone_ind[TONES_IN_TUNE] = BROTHER_JOHN_TUNE;
+const int tone_periods[25] = {2024, 1911, 1803, 1702, 1607, 1516, 1431, 1351, 1275, 1203, 1136, 1072, 1012, 955, 901, 851, 803, 758, 715, 675, 637, 601, 568, 536, 506};
+const int tone_beats[TONES_IN_TUNE] = BROTHER_JOHN_HALF_BEATS;
 
-extern ToneGen tonGen;
-extern Can can0;
-void playTone(MusicPlayer *self, int unused){
-	if(self->alive){
-		if(self->mode == LEADER_MODE){
-			self->beat += beats[self->NextTone];
-			self->beat = self->beat%2000;
-			if(self->NextTone == 4){
-				CANMsg msg;				
-				msg.nodeId = LEADER_MODE;
-				msg.length = 2;
-				msg.msgId = 0;
-				msg.buff[0] = SLAVE_MODE;
-				CAN_SEND(&can0, &msg);
-			}
-			if(self->NextTone == 8){
-				CANMsg msg;				
-				msg.nodeId = LEADER_MODE;
-				msg.length = 2;
-				msg.msgId = 0;
-				msg.buff[0] = SECOND_SLAVE_MODE;
-				CAN_SEND(&can0, &msg);
-			}
-		}
+extern ToneGen toneGen;
+
+void play_tune(MusicPlayer *self, int unused){
+	if(self->enabled){
+		int period = tone_periods[tone_ind[self->index] + 10 + self->key];
+		SYNC(&toneGen, setAlive, 1);
+		ASYNC(&toneGen, wave, period);
+		int delay = (BPM_TO_MSEC(self->tempo) * tone_beats[self->index])/2;
+		SEND(MSEC(delay-50),MSEC(50),self, end_tone, 0);		
+	}
+}
+
+void end_tone(MusicPlayer *self, int unused){
+	//disable tone
+	SYNC(&toneGen, setAlive, 0);
+	//delay before next tone
+	self->index++;
+	if(self->index >= TONES_IN_TUNE)
+		self->index = 0;
 		
-		int fIndex = indicies[self->NextTone];
-		int period = periods[10 + fIndex + self->key];
-		SYNC(&tonGen, setAlive, 1);
-		BEFORE(USEC(100), &tonGen, wave, period);
-		float factor = 120/(float)self->tempo;
-		Time delay = MSEC((int)(factor*beats[self->NextTone]))-self->gap;
-		SEND(delay,self->ToneDeadline, self, endTone, 0);
-	}	
+	SEND(MSEC(50), MSEC(50),self, play_tune, 0);
 }
-
-void endTone(MusicPlayer *self, int unused){
-	
-	BEFORE(self->ToneDeadline,&tonGen, setAlive, 0);
-	if(self->NextTone == 31){
-		self->NextTone = 0;
-	}else{
-		self->NextTone++;
-		if(self->mode == LEADER_MODE){
-			if(self->beat == 0){
-				self->tempo = self->tempoBuf;
-				CANMsg msg;
-				msg.nodeId = LEADER_MODE;
-				msg.length = 2;
-				msg.msgId = 3;
-				msg.buff[0] = (unsigned char) self->tempo;
-				msg.buff[1] = 0;
-				CAN_SEND(&can0, &msg);
-			}
-		}
-	}
-	SEND(self->gap,self->ToneDeadline, self, playTone, 0);
+void start_player(MusicPlayer *self, int unused){
+	self->enabled = 1;
+	self->index = 0;
+	//ASYNC(&player, set_LED, 0);
+	ASYNC(self, play_tune, unused);
 }
-
-void setTempoBuf(MusicPlayer *self, int tempo){
-	if(tempo >= 60 && tempo <= 240){
-		self->tempoBuf = tempo;
-	}	
+void stop_player(MusicPlayer *self, int unused){
+	self->enabled = 0;
 }
-void setTempo(MusicPlayer *self, int tempo){
-	self->tempo = tempo;
+int get_player_enabled(MusicPlayer *self, int unused){
+	return self->enabled;
 }
-void setKey(MusicPlayer *self, int key){
-	if(key >= -5 && key<=5){
-		self->key = key;
-	}
+void set_player_enabled(MusicPlayer *self, int value){
+	self->enabled = value;
 }
-void toggleMusic(MusicPlayer *self, int unused){
-	if(self->alive){
-		stopMusic(self,unused);
-	}
-	else{
-		startMusic(self,unused);
-	}
+void set_key(MusicPlayer *self, int value){
+	self->key = value;
 }
-void changeStartPos(MusicPlayer *self, int n){
-	if(n>0 && n<32){
-		self->startPos = 0;
-	}
-	
+void inc_key(MusicPlayer *self, int unused){
+	if(self->key < KEY_MAX)
+		self->key++;
 }
-void startMusic(MusicPlayer *self, int unused){
-	self->alive = 1;
-	self->NextTone = 0;
-	BEFORE(self->ToneDeadline, self, playTone,0);
+void dec_key(MusicPlayer *self, int unused){
+	if(self->key > KEY_MIN)
+		self->key--;
 }
-void stopMusic(MusicPlayer *self, int unused){
-	self->alive = 0;
+void set_tempo(MusicPlayer *self, int value){
+	self->tempo = value;
+}
+void inc_tempo(MusicPlayer *self, int unused){
+	if(self->tempo < TEMPO_MAX)
+		self->tempo+=10;
+}
+void dec_tempo(MusicPlayer *self, int unused){
+	if(self->tempo > TEMPO_MIN)
+		self->tempo-=10;
+}
+void set_index(MusicPlayer *self, int value){
+	self->index = value;
+}
+int get_key(MusicPlayer *self, int unused){
+	return self->key;
+}
+int get_tempo(MusicPlayer *self, int unused){
+	return self->tempo;
 }
