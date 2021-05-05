@@ -15,7 +15,10 @@ void play_tune(MusicPlayer *self, int unused){
 		int period = tone_periods[tone_ind[self->index] + 10 + self->key];
 		SYNC(&toneGen, setAlive, 1);
 		ASYNC(&toneGen, wave, period);
-		int delay = (BPM_TO_MSEC(self->tempo) * tone_beats[self->index])/2;
+		int tempo = self->tempo;
+		if(self->modulated == MOD_TEMPO)
+			tempo = self->mod_tempo;
+		int delay = (BPM_TO_MSEC(tempo) * tone_beats[self->index])/2;
 		SEND(MSEC(delay-50),MSEC(50),self, end_tone, 0);		
 	}
 }
@@ -75,4 +78,14 @@ int get_key(MusicPlayer *self, int unused){
 }
 int get_tempo(MusicPlayer *self, int unused){
 	return self->tempo;
+}
+void set_mod_tempo(MusicPlayer *self, int value){
+	if(value > TEMPO_MAX)
+		self->mod_tempo = TEMPO_MAX;
+	else
+		self->mod_tempo = value;
+}
+
+void set_modulated(MusicPlayer *self, int value){
+	self->modulated = value;
 }

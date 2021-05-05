@@ -4,8 +4,11 @@ extern Serial sci0;
 void wave(ToneGen *self, int halfperiod){
 	if(self->alive){
 		if(self->muted == 0) {
-				if(self->wave){
-				*DIG_AN_CONV = self->volume;
+			if(self->wave){
+				if(self->modulated == MOD_VOL)
+					*DIG_AN_CONV = self->modVolume;
+				else 
+					*DIG_AN_CONV = self->volume;					
 				self->wave = 0;
 			}
 			else{
@@ -39,4 +42,17 @@ int getMuted(ToneGen *self,int unused) {
 
 void setMuted(ToneGen *self,int value) {
 	self->muted = value;
+}
+
+void setModVol(ToneGen *self, int value){
+	if(value <= MAX_VOLUME && value >= 0)
+		self->modVolume = value;
+	else if(value > MAX_VOLUME)
+		self->modVolume = MAX_VOLUME;
+}
+void setModulated(ToneGen *self, int value){
+	self->modulated = value;
+}
+int getVol(ToneGen *self, int unused){
+	return self->volume;
 }
