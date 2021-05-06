@@ -19,6 +19,7 @@ typedef struct{
 	int muted; //muted = 1, no sound
 	unsigned char modVolume;
 	unsigned modulated;
+	int modPeriod;
 }ToneGen;
 
 void wave(ToneGen* self, int halfperiod);
@@ -30,6 +31,6 @@ void setAlive(ToneGen *self, int unused);
 int getMuted(ToneGen *self,int unused);
 void setMuted(ToneGen *self,int value);
 void setModulated(ToneGen *self, int value);
-
+void setModPeriod(ToneGen *self, int value);
 
 #endif

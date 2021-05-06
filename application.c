@@ -87,7 +87,7 @@ App app = { initObject(), 0, 'X', 0 , 120, 0, 0 , 0, 0, initTimer(), 0,0,0,0};
 App app = { initObject(), 0, 'X', 0, 0,  initTimer(), 0, 0, 0};
 #endif
 
-Modulator modulator = {initObject(),MIN_F_LFO,MAX_I_LFO,MOD_OFF, MOD_VOL};
+Modulator modulator = {initObject(), MIN_F_LFO, MAX_I_LFO, SQUARE, 0, 0, MOD_OFF};
 
 void reader(App*, int);
 void receiver(App*, int);
@@ -98,9 +98,9 @@ Serial sci0 = initSerial(SCI_PORT0, &app, reader);
 
 Can can0 = initCan(CAN_PORT0, &app, receiver);
 
-ToneGen toneGen = {initObject(),5,TONE_DEADLINE,0,0,0,5,0};
+ToneGen toneGen = {initObject(),5,TONE_DEADLINE,0,0,0,5,0,0};
 
-MusicPlayer player = {initObject(), 120, 0, 0,0, 120};
+MusicPlayer player = {initObject(), 120, 0, 0,0, 0, 120, 0};
 
 SysIO io = initSysIO(SIO_PORT0, &app, button_pressed);
 
@@ -122,9 +122,12 @@ void wave_square(Modulator *self, int unused){
 		else if(self->param == MOD_TEMPO){
 			int tempo = SYNC(&player, get_tempo, 0);
 			int modTempo = tempo *(1 + ((double)self->amplitude)/100);
-			DEBUG_INT(modTempo);
-			DEBUG(self->amplitude);
 			SYNC(&player, set_mod_tempo, modTempo);
+		}
+		else if(self->param == MOD_PERIOD){
+			int period = SYNC(&player, get_tone_period, 0);
+			int modPeriod = period *(1 + ((double)self->amplitude)/100);
+			SYNC(&toneGen, setModPeriod, modPeriod);
 		}
 		AFTER(MSEC(self->period/2),self, wave_square, 0);
 		self->amplitude = -self->amplitude;
@@ -138,7 +141,16 @@ void wave_saw(Modulator *self, int value){
 			int modVol = vol *(1 + ((double)self->amplitude)/100);		
 			SYNC(&toneGen, setModVol, modVol);
 		}
-		
+		else if(self->param == MOD_TEMPO){
+			int tempo = SYNC(&player, get_tempo, 0);
+			int modTempo = tempo *(1 + ((double)self->amplitude)/100);
+			SYNC(&player, set_mod_tempo, modTempo);
+		}
+		else if(self->param == MOD_PERIOD){
+			int period = SYNC(&player, get_tone_period, 0);
+			int modPeriod = period *(1 + ((double)self->amplitude)/100);
+			SYNC(&toneGen, setModPeriod, modPeriod);
+		}
 		
 		AFTER(MSEC(self->period/15),self, wave_saw, 0);
 		int step =  2*self->intensity/15;
@@ -162,6 +174,10 @@ void set_mod_param(Modulator *self, int value){
 		if(self->intensity > MAX_I_LFO/2)
 			self->intensity = MAX_I_LFO/2;
 	}
+	if(value == MOD_PERIOD){
+		if(self->intensity > MAX_I_LFO/4)
+			self->intensity = MAX_I_LFO/4;
+	}
 	SYNC(&toneGen, setModulated, value);
 	SYNC(&player, set_modulated, value);
 	
@@ -173,8 +189,17 @@ void wave_sine(Modulator *self, int value){
 			int vol = SYNC(&toneGen, getVol, 0);
 			int modVol = vol *(1 + ((double)self->amplitude)/100);		
 			SYNC(&toneGen, setModVol, modVol);
-		}		
-		
+		}
+		else if(self->param == MOD_TEMPO){
+			int tempo = SYNC(&player, get_tempo, 0);
+			int modTempo = tempo *(1 + ((double)self->amplitude)/100);
+			SYNC(&player, set_mod_tempo, modTempo);
+		}
+		else if(self->param == MOD_PERIOD){
+			int period = SYNC(&player, get_tone_period, 0);
+			int modPeriod = period *(1 + ((double)self->amplitude)/100);
+			SYNC(&toneGen, setModPeriod, modPeriod);
+		}
 		AFTER(MSEC(self->period/16),self, wave_sine, 0);
 	
 		int amplitude = self->intensity * sin((double)self->sample/16*2*PI);
@@ -188,6 +213,9 @@ void set_mod_period(Modulator *self, int value){
 	if(value >= MAX_F_LFO || value <= MIN_F_LFO) {
 		self->period = value;
 	}
+	else{
+		DEBUG("invalid modulation frequency\n");
+	}
 }
 
 void set_mod_intensity(Modulator *self, int value){
@@ -195,6 +223,10 @@ void set_mod_intensity(Modulator *self, int value){
 	if(self->param == MOD_TEMPO){
 		if(self->intensity > MAX_I_LFO/2)
 			self->intensity = MAX_I_LFO/2;
+	}
+	if(self->param == MOD_PERIOD){
+		if(self->intensity > MAX_I_LFO/4)
+			self->intensity = MAX_I_LFO/4;
 	}
 	if(self->waveform == SQUARE){
 		self->amplitude = self->intensity;
@@ -533,7 +565,7 @@ void reader(App *self, int c) {
 		}
 		self->count = 0;
 
-		//check if valid waveform
+		//check if valid mode
 		if(param == MOD_VOL || param == MOD_PERIOD || param == MOD_TEMPO || param == MOD_OFF) {
 			DEBUG("Modulate paramter: ");
 			DEBUG_INT(param);

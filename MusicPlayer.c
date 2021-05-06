@@ -13,6 +13,7 @@ extern ToneGen toneGen;
 void play_tune(MusicPlayer *self, int unused){
 	if(self->enabled){
 		int period = tone_periods[tone_ind[self->index] + 10 + self->key];
+		self->tone_period = period;
 		SYNC(&toneGen, setAlive, 1);
 		ASYNC(&toneGen, wave, period);
 		int tempo = self->tempo;
@@ -88,4 +89,7 @@ void set_mod_tempo(MusicPlayer *self, int value){
 
 void set_modulated(MusicPlayer *self, int value){
 	self->modulated = value;
+}
+int get_tone_period(MusicPlayer *self, int value){
+	return self->tone_period;
 }

@@ -1,8 +1,11 @@
 #include "ToneGen.h"
 Time hp = USEC(1072);
 extern Serial sci0;
-void wave(ToneGen *self, int halfperiod){
+void wave(ToneGen *self, int period){
 	if(self->alive){
+		int realPeriod = period;
+		if(self->modulated == MOD_PERIOD)
+			realPeriod = self->modPeriod;			
 		if(self->muted == 0) {
 			if(self->wave){
 				if(self->modulated == MOD_VOL)
@@ -16,7 +19,7 @@ void wave(ToneGen *self, int halfperiod){
 				self->wave = 1;
 			}
 		}
-		SEND(USEC(halfperiod), self->deadline, self, wave, halfperiod);
+		SEND(USEC(realPeriod), self->deadline, self, wave, period);
 	}
 	
 }
@@ -55,4 +58,7 @@ void setModulated(ToneGen *self, int value){
 }
 int getVol(ToneGen *self, int unused){
 	return self->volume;
+}
+void setModPeriod(ToneGen *self, int value){
+	self->modPeriod = value;
 }

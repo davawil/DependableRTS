@@ -24,6 +24,7 @@ typedef struct{
 	int key;
 	int index;
 	int enabled;
+	int tone_period;
 	int mod_tempo;
 	int modulated;
 } MusicPlayer;
@@ -47,5 +48,7 @@ void set_index(MusicPlayer *self, int value);
 int get_key(MusicPlayer *self, int unused);
 int get_tempo(MusicPlayer *self, int unused);
 void set_modulated(MusicPlayer *self, int value);
+void set_mod_tone_period(MusicPlayer *self, int value);
+int get_tone_period(MusicPlayer *self, int value);
 
 #endif
