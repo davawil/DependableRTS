@@ -168,21 +168,6 @@ void wave_saw(Modulator *self, int value){
 	}
 }
 
-void set_mod_param(Modulator *self, int value){
-	self->param = value;
-	if(value == MOD_TEMPO){
-		if(self->intensity > MAX_I_LFO/2)
-			self->intensity = MAX_I_LFO/2;
-	}
-	if(value == MOD_PERIOD){
-		if(self->intensity > MAX_I_LFO/4)
-			self->intensity = MAX_I_LFO/4;
-	}
-	SYNC(&toneGen, setModulated, value);
-	SYNC(&player, set_modulated, value);
-	
-}
-
 void wave_sine(Modulator *self, int value){
 	if(self->waveform == SINUS){
 		if(self->param == MOD_VOL){
@@ -239,33 +224,52 @@ void set_mod_intensity(Modulator *self, int value){
 		self->amplitude = 0;
 		self->sample = 0;
 	}
-	
 }
-
-void set_mod_waveform(Modulator *self, int value){
-	if(self->waveform != value){
-		
-		self->waveform = value;
-		
-		if(value == SQUARE){
+void start_waveform(Modulator *self, int unused){
+	if(self->param != MOD_OFF){
+		if(self->waveform == SQUARE){
 			self->amplitude = self->intensity;
 			wave_square(self, 0);
-		}
-		
-		if(value == SAWTOOTH){
+		}		
+		if(self->waveform == SAWTOOTH){
 			self->amplitude = -self->intensity;
 			self->sample=0;
 			wave_saw(self, 0);
 		}
-		
-		if(value == SINUS){
+		if(self->waveform == SINUS){
 			self->amplitude = 0;
 			self->sample=0;
 			wave_sine(self, 0);
 		}
+	}		
+}
+
+void set_mod_waveform(Modulator *self, int value){
+	if(self->waveform != value){		
+		self->waveform = value;
+		start_waveform(self, 0);
 	}
 }
 
+void set_mod_param(Modulator *self, int value){
+	
+	if(value == MOD_TEMPO){
+		if(self->intensity > MAX_I_LFO/2)
+			self->intensity = MAX_I_LFO/2;
+	}
+	if(value == MOD_PERIOD){
+		if(self->intensity > MAX_I_LFO/4)
+			self->intensity = MAX_I_LFO/4;
+	}
+	//starts the waveform
+	if(self->param != value){
+		self->param = value;
+		start_waveform(self, 0);
+	}
+		
+	SYNC(&toneGen, setModulated, value);
+	SYNC(&player, set_modulated, value);
+}
 
 int get_mod_amplitude(Modulator *self, int unused){
 	return self->amplitude;
